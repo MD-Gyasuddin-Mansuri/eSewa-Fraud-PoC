@@ -1,0 +1,58 @@
+services:
+  kafka:
+    image: apache/kafka:3.7.0
+    container_name: esewa-kafka
+    network_mode: host
+    environment:
+      # KRaft Specific Settings
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:29093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+
+      # Networking - Bilingual Listeners
+      KAFKA_LISTENERS: INTERNAL://0.0.0.0:29092,CONTROLLER://0.0.0.0:29093,EXTERNAL://0.0.0.0:9092
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://localhost:29092,EXTERNAL://172.31.21.213:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+
+      # Cluster Metadata
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+
+  debezium:
+    image: quay.io/debezium/connect:2.4
+    container_name: esewa-debezium
+    network_mode: host
+    environment:
+      - BOOTSTRAP_SERVERS=localhost:29092
+      - GROUP_ID=1
+      - CONFIG_STORAGE_TOPIC=esewa_connect_configs
+      - OFFSET_STORAGE_TOPIC=esewa_connect_offsets
+      - STATUS_STORAGE_TOPIC=esewa_connect_statuses
+      - CONFIG_STORAGE_REPLICATION_FACTOR=1
+      - OFFSET_STORAGE_REPLICATION_FACTOR=1
+      - STATUS_STORAGE_REPLICATION_FACTOR=1
+      - KEY_CONVERTER=org.apache.kafka.connect.json.JsonConverter
+      - VALUE_CONVERTER=org.apache.kafka.connect.json.JsonConverter
+    depends_on:
+      - kafka
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: esewa-grafana
+    network_mode: host
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - ./grafana_storage:/var/lib/grafana
+  clickhouse:
+    image: clickhouse/clickhouse-server:latest
+    container_name: esewa-clickhouse
+    network_mode: host
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
