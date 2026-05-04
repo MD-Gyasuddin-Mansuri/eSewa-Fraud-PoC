@@ -1,0 +1,78 @@
+#!/usr/bin/env python3
+import os
+import sys
+import subprocess
+from google import genai
+
+gemini_key = os.environ.get("GEMINI_API_KEY")
+if not gemini_key:
+    print("❌ Error: GEMINI_API_KEY environment variable is not set.")
+    sys.exit(1)
+
+client = genai.Client(api_key=gemini_key)
+
+if len(sys.argv) < 2:
+    print("Usage: ./ask_esewa_ai.py \"Your question here\"")
+    sys.exit(1)
+user_question = sys.argv[1]
+
+schema_context = """
+You are a ClickHouse SQL Expert SRE.
+Table Name: esewa_db.wallet_txns_dist
+Columns:
+- id (UInt32)
+- type (String)
+- amount (Float64)
+- nameOrig (String)
+- nameDest (String)
+- isFraud (UInt8) -> 1 means fraud, 0 means legit.
+
+Write a fast ClickHouse SQL query to answer the user's question.
+Return ONLY the raw SQL query. Do not include markdown formatting like ```sql or any explanations.
+
+CRITICAL RULE: You are strictly a READ-ONLY assistant. NEVER generate DROP, DELETE, ALTER, UPDATE, or TRUNCATE statements. Only generate SELECT queries.
+"""
+
+print(f"🧠 Gemini is thinking about: '{user_question}'...")
+try:
+    response = client.models.generate_content(
+        model='gemini-2.5-flash',
+        contents=f"{schema_context}\n\nUser Question: {user_question}"
+    )
+
+    if not response.text:
+        print("🚨 AI SAFETY TRIGGERED: Gemini refused to answer. You probably asked to do something destructive!")
+        sys.exit(1)
+
+    generated_sql = response.text.strip().replace("```sql", "").replace("```", "").strip()
+
+    print("\n✨ Generated SQL:")
+    print(f"\033[92m{generated_sql}\033[0m\n")
+
+    forbidden_keywords = ["DROP", "DELETE", "ALTER", "TRUNCATE", "UPDATE", "INSERT"]
+    upper_sql = generated_sql.upper()
+    if any(keyword in upper_sql for keyword in forbidden_keywords):
+        print("🚨 SECURITY ALERT: Destructive query detected! Execution blocked by SRE Firewall.")
+        sys.exit(1)
+
+    confirm = input("⚠️ Do you want to execute this query on the production cluster? [y/N]: ")
+    if confirm.lower() != 'y':
+        print("🚫 Execution aborted by user.")
+        sys.exit(0)
+
+
+    print("🚀 Executing on ClickHouse Cluster...\n")
+    result = subprocess.run(
+        ["clickhouse-client", "-q", generated_sql],
+        capture_output=True, text=True
+    )
+
+    if result.returncode == 0:
+        print("📊 Result:\n")
+        print(result.stdout)
+    else:
+        print("❌ ClickHouse Error:")
+        print(result.stderr)
+
+except Exception as e:
+    print(f"❌ Failed to connect to Gemini: {e}")
